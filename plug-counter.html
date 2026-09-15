@@ -83,7 +83,21 @@
         border-top:1px solid var(--line-soft)}
   .hint b{color:var(--ink-2); font-weight:500}
 
-  /* ---- actions ---- */
+  /* ---- pickers & actions ---- */
+  .pickers{display:flex; flex-wrap:wrap; gap:8px}
+  .pick{display:flex; flex-direction:column; gap:5px; padding:9px 11px; min-width:0;
+        border:1px solid var(--line); background:var(--panel); border-radius:2px; cursor:pointer}
+  .pick:focus-within{border-color:var(--accent)}
+  .pick-t{font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:.05em;
+          color:var(--ink-2)}
+  .pick input[type=file]{font-family:var(--sans); font-size:11.5px; color:var(--ink-3);
+                         max-width:100%; width:auto}
+  .pick input[type=file]::file-selector-button{
+    font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:.03em;
+    padding:7px 13px; margin-right:9px; cursor:pointer; border-radius:2px;
+    border:1px solid var(--accent); background:var(--accent); color:var(--on-accent)}
+  .pick input[type=file]:hover::file-selector-button{background:var(--accent-deep);
+    border-color:var(--accent-deep)}
   .actions{display:flex; flex-wrap:wrap; gap:8px}
   .btn{appearance:none; font-family:var(--mono); font-size:13.5px; font-weight:600;
        letter-spacing:.03em; padding:8px 14px; border:1px solid var(--line);
@@ -190,14 +204,21 @@
       <canvas id="view" width="480" height="300"></canvas>
       <div class="busy" id="busy" hidden><span>計算中…</span></div>
     </div>
-    <p class="hint">點<b>空白處</b>補上漏掉的塞頭　·　點<b>圈圈</b>刪掉算錯的　·　上方數字即時更新</p>
+    <p class="hint">點<b>空白處</b>補上漏掉的塞頭　·　點<b>圈圈</b>刪掉算錯的　·　上方數字即時更新<br>照片也可以直接拖進來或貼上</p>
   </section>
 
+  <div class="pickers">
+    <label class="pick">
+      <span class="pick-t">從相簿選照片</span>
+      <input id="file" type="file" accept="image/*">
+    </label>
+    <label class="pick">
+      <span class="pick-t">直接用相機拍</span>
+      <input id="cam" type="file" accept="image/*" capture="environment">
+    </label>
+  </div>
+
   <div class="actions">
-    <label class="btn primary" for="file">選擇照片</label>
-    <input id="file" type="file" accept="image/*" hidden>
-    <label class="btn" for="cam">用相機拍</label>
-    <input id="cam" type="file" accept="image/*" capture="environment" hidden>
     <button class="btn" id="btnSample">載入範例</button>
     <button class="btn" id="btnReset">回到自動結果</button>
     <button class="btn" id="btnClear">清空改全手動</button>
@@ -609,9 +630,9 @@ function analyse(){
   const src = S.img;
 
   /* stage 1 - find the cluster on a small copy */
-  const sw = src.naturalWidth, sh = src.naturalHeight;
+  const sw = src.w, sh = src.h;
   const k = Math.min(1, 600/Math.max(sw, sh));
-  const s1 = scaledCopy(src, 0, 0, sw, sh,
+  const s1 = scaledCopy(src.el, 0, 0, sw, sh,
                         Math.max(1, Math.round(sw*k)), Math.max(1, Math.round(sh*k)));
   const W1 = s1.canvas.width, H1 = s1.canvas.height;
   const hsv1 = hsvOf(s1.ctx.getImageData(0, 0, W1, H1));
@@ -657,7 +678,7 @@ function analyse(){
   /* stage 2 - crop the cluster out of the full-size photo and work at ~1000 px */
   const z = Math.min(1000/Math.max(cw0, ch0), 1.5);
   const W = Math.max(8, Math.round(cw0*z)), H = Math.max(8, Math.round(ch0*z));
-  const s2 = scaledCopy(src, x0, y0, cw0, ch0, W, H);
+  const s2 = scaledCopy(src.el, x0, y0, cw0, ch0, W, H);
   const hsv2 = hsvOf(s2.ctx.getImageData(0, 0, W, H));
 
   /* reuse the whole-photo focus decision - re-thresholding inside the crop is
@@ -728,8 +749,10 @@ function analyse(){
     comps: kept.length,
     merged: rows.filter(r => r.k > 1).length,
     ws,
-    plugPx: Math.round(Math.sqrt(unit)*(cw0/W)),   /* one plug, in the photo's own pixels */
-    share: cw0/sw,                                 /* how much of the frame the pile fills */
+    workPx: Math.round(Math.sqrt(unit)*(cw0/W)),          /* one plug as the maths saw it */
+    plugPx: Math.round(Math.sqrt(unit)*(cw0/W)*src.k0),   /* one plug in the original photo */
+    photo: `${src.ow}×${src.oh}`,
+    share: cw0/sw,                                        /* share of the frame the pile fills */
     ms: Math.round(performance.now()-t0)
   };
   S.label = "";
@@ -793,8 +816,8 @@ function render(){
   els.mWs.className = st && st.ws !== S.autoN ? "edit" : "";
   els.mTime.innerHTML = st ? `${st.ms}<small> ms</small>` : "—";
   if (st) {
-    const thin = st.plugPx < 25;
-    els.qual.innerHTML = `拍攝品質：單顆約 <b>${st.plugPx}</b> px 見方 ·`
+    const thin = st.workPx < 25;
+    els.qual.innerHTML = `照片 <b>${st.photo}</b> · 單顆約 <b>${st.plugPx}</b> px 見方 ·`
       + ` 整捆佔畫面寬 <b>${Math.round(st.share*100)}%</b> · `
       + (thin ? "解析度偏低，靠近一點重拍會更準" : "解析度充足");
     els.qual.className = thin ? "qual warn" : "qual";
@@ -883,11 +906,35 @@ function rerun(){
 }
 function loadSrc(url, name){
   const img = new Image();
-  img.onload = () => { S.img = img; S.view = "result"; syncTabs(); rerun(); };
+  img.onload = () => {
+    /* a 12 MP phone photo costs seconds to work through for no gain: the resolution
+       sweep counts the same 20 plugs all the way down to a 450 px wide photo */
+    const w0 = img.naturalWidth, h0 = img.naturalHeight;
+    if (Math.max(w0, h0) > 2200) {
+      const z = 2000/Math.max(w0, h0);
+      const c = scaledCopy(img, 0, 0, w0, h0, Math.round(w0*z), Math.round(h0*z));
+      S.img = {el:c.canvas, w:c.canvas.width, h:c.canvas.height, k0:w0/c.canvas.width, ow:w0, oh:h0};
+    } else {
+      S.img = {el:img, w:w0, h:h0, k0:1, ow:w0, oh:h0};
+    }
+    S.view = "result"; syncTabs(); rerun();
+  };
   img.onerror = () => fail("這個檔案讀不進來，換一張試試");
   img.decoding = "sync";
   img.src = url;
   els.status.textContent = name || "讀取中…";
+}
+/* read through FileReader rather than URL.createObjectURL: a blob: URL belongs to the
+   page's origin, and this page runs in a sandboxed frame where that can fail silently */
+function loadFile(fl){
+  if (!fl) return;
+  if (!/^image\//.test(fl.type || "")) { fail("這不是圖片檔（" + (fl.type || "未知格式") + "）"); return; }
+  els.busy.hidden = false;
+  els.status.textContent = "讀取 " + fl.name + "…";
+  const fr = new FileReader();
+  fr.onload = () => loadSrc(fr.result, fl.name);
+  fr.onerror = () => { els.busy.hidden = true; fail("讀取檔案失敗，再試一次"); };
+  fr.readAsDataURL(fl);
 }
 function syncTabs(){
   [...els.tabs.children].forEach(t => {
@@ -898,9 +945,7 @@ function syncTabs(){
 }
 function pick(input){
   input.addEventListener("change", () => {
-    const fl = input.files && input.files[0];
-    if (!fl) return;
-    loadSrc(URL.createObjectURL(fl), fl.name);
+    loadFile(input.files && input.files[0]);
     input.value = "";
   });
 }
@@ -924,13 +969,12 @@ els.btnClear.addEventListener("click", () => {
   });
 addEventListener("paste", e => {
   const it = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith("image/"));
-  if (it) loadSrc(URL.createObjectURL(it.getAsFile()), "貼上的照片");
+  if (it) loadFile(it.getAsFile());
 });
 els.box.addEventListener("dragover", e => e.preventDefault());
 els.box.addEventListener("drop", e => {
   e.preventDefault();
-  const fl = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (fl && fl.type.startsWith("image/")) loadSrc(URL.createObjectURL(fl), fl.name);
+  loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
 });
 loadSrc(SAMPLE, "範例照片");
 </script>
