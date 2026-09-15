@@ -105,6 +105,27 @@
   .met dd small{font-size:11px; font-weight:400; color:var(--ink-3); letter-spacing:.02em}
   .met dd.edit{color:var(--signal)}
 
+  /* ---- detail table ---- */
+  .tbl{padding:12px 14px 14px}
+  .tbl h2{margin:0 0 1px; font-family:var(--mono); font-size:13px; font-weight:700;
+          letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2)}
+  .tbl h2 span{font-family:var(--sans); font-size:12px; font-weight:400; letter-spacing:0;
+               text-transform:none; color:var(--ink-3)}
+  .tbl-scroll{overflow-x:auto; margin-top:9px}
+  table{border-collapse:collapse; width:100%; font-family:var(--mono);
+        font-variant-numeric:tabular-nums; font-size:13.5px}
+  th{text-align:right; font-size:10.5px; font-weight:600; letter-spacing:.1em;
+     text-transform:uppercase; color:var(--ink-3); padding:0 8px 5px;
+     border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th:last-child,td:last-child{text-align:left; width:42%}
+  td{padding:5px 8px; border-bottom:1px solid var(--line-soft); color:var(--ink)}
+  tr:last-child td{border-bottom:0}
+  td.note{font-family:var(--sans); font-size:12px; color:var(--ink-3)}
+  tr.multi td.k{color:var(--accent); font-weight:700}
+  tr.edgy td.note{color:var(--signal)}
+  tr.edgy td.r{color:var(--signal); font-weight:700}
+
   /* ---- advanced ---- */
   details{padding:0}
   summary{cursor:pointer; padding:10px 14px; font-family:var(--mono); font-size:13px;
@@ -181,18 +202,29 @@
     <div class="met"><dt>自動偵測</dt><dd id="mAuto">—</dd></div>
     <div class="met"><dt>手動修正</dt><dd id="mEdit">—</dd></div>
     <div class="met"><dt>單顆面積</dt><dd id="mUnit">—<small> px²</small></dd></div>
-    <div class="met"><dt>連通區塊</dt><dd id="mComp">—</dd></div>
-    <div class="met"><dt>面積推估</dt><dd id="mArea">—</dd></div>
+    <div class="met"><dt>綠色區塊</dt><dd id="mComp">—</dd></div>
+    <div class="met"><dt>黏在一起</dt><dd id="mMerge">—</dd></div>
+    <div class="met"><dt>分水嶺核對</dt><dd id="mWs">—</dd></div>
     <div class="met"><dt>運算耗時</dt><dd id="mTime">—<small> ms</small></dd></div>
   </dl>
+
+  <section class="panel tbl">
+    <h2>判定明細 <span>每塊綠色區域 ÷ 單顆面積</span></h2>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>區塊</th><th>面積 px²</th><th>÷ 單顆</th><th>判定</th><th>備註</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="note">尚無結果</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 
   <details class="panel">
     <summary>進階參數</summary>
     <div class="sliders">
       <div class="sl">
-        <div class="sl-top"><label for="hfac">分離靈敏度</label><output id="oHfac">0.10</output></div>
-        <input type="range" id="hfac" min="0.02" max="0.50" step="0.02" value="0.10">
-        <p>控制黏在一起的塞頭要不要切開。調小＝切得更細（兩顆貼著也分開），調大＝合併得更多。</p>
+        <div class="sl-top"><label for="unitAdj">單顆面積微調</label><output id="oUnitAdj">1.00</output></div>
+        <input type="range" id="unitAdj" min="0.75" max="1.30" step="0.01" value="1.00">
+        <p>直接乘在自動量到的單顆面積上，是最直接影響總數的參數。總數偏多就調大，偏少就調小 —— 下方明細表的比值會跟著變。</p>
       </div>
       <div class="sl">
         <div class="sl-top"><label for="minc">最小面積</label><output id="oMinc">0.35</output></div>
@@ -217,10 +249,11 @@
     <ol>
       <li><b>找叢集</b>：先縮到 600 px，用色相 168°±50° 找綠色，並用局部邊緣能量剔除模糊背景，取最大的一塊當作塞頭叢集。</li>
       <li><b>放大重算</b>：把叢集區域從原始照片裁出來、放大到約 1000 px 再處理 —— 手機照片直接整張算會因為太小而黏成一團。</li>
-      <li><b>分出單顆</b>：對綠色遮罩做 Otsu 自動門檻（把透明套環排除），再用距離轉換 + 分水嶺氾濫，配合 h-maxima 抑制把相鄰的塞頭切開，同一顆的雙峰則合併。</li>
-      <li><b>數塞頭</b>：每一塊就是一顆塞頭 = 一根管子。面積推估（總面積 ÷ 單顆面積）列在上方當交叉驗證，兩個數字差很多就表示參數要調。</li>
+      <li><b>量單顆面積</b>：對綠色遮罩做 Otsu 自動門檻把透明套環排除，切出各塊綠色區域，取面積的<b>中位數</b>當一顆的面積。用中位數而不是最小值 —— 最小的那塊往往是被手掌遮住、只露一角的塞頭，拿它當單位會把總數算成兩倍。</li>
+      <li><b>面積相除</b>：每塊區域各自算 <b>四捨五入(區塊面積 ÷ 單顆面積)</b>，至少算一顆，相加就是總數。黏在一起的兩顆面積約兩倍，自然就被算成 2。明細表列出每一塊的比值，比值接近 .5 的會標記出來 —— 那是唯一可能算錯的地方。</li>
+      <li><b>標記位置</b>：知道一顆多大之後，用距離轉換在該塊裡挑出 k 個最深的點當標記，所以黏在一起的也會各自標上號碼。另外獨立跑一次分水嶺分割當交叉核對，兩個數字一致就很可靠。</li>
     </ol>
-    <p class="cal">範例照片的正確答案是 <b>20</b> 顆，目前參數下自動偵測也是 <b>20</b> 顆。不同光線、背景或堆疊方式仍可能差一兩顆 —— 直接在圖上點一下修正最快。</p>
+    <p class="cal">範例照片的正確答案是 <b>20</b> 顆：面積法算出 <b>20</b>，分水嶺核對也是 <b>20</b>。明細表裡 22969 px² 那塊比值 4.43，是這張唯一比較接近臨界的判定。</p>
   </section>
 </div>
 
@@ -230,11 +263,12 @@ const SAMPLE = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgwKC
 
 const els = {};
 ["count","status","busy","view","box","tabs","file","cam","btnSample","btnReset","btnClear",
- "mAuto","mEdit","mUnit","mComp","mArea","mTime","hfac","minc","tight","focus",
- "oHfac","oMinc","oTight","oFocus"].forEach(id => els[id] = document.getElementById(id));
+ "mAuto","mEdit","mUnit","mComp","mMerge","mWs","mTime","rows","unitAdj","minc","tight","focus",
+ "oUnitAdj","oMinc","oTight","oFocus"].forEach(id => els[id] = document.getElementById(id));
 
-const P = { hfac:0.10, minc:0.35, tight:1.00, focus:1.00 };
-const S = { img:null, crop:null, tint:null, full:null, roi:null, stats:null,
+const P = { unitAdj:1.00, minc:0.35, tight:1.00, focus:1.00 };
+const HFAC = 0.10;   /* watershed h-maxima level, cross-check only */
+const S = { img:null, crop:null, tint:null, full:null, roi:null, stats:null, rows:null,
             markers:[], autoN:0, added:0, removed:0, rTyp:20, view:"result", label:"" };
 
 /* ------------------------------------------------------------------ helpers */
@@ -524,6 +558,28 @@ function focusField(G, w, h, strength){
   for (let i=0; i<out.length; i++) out[i] = cov[i] >= 0.12 ? 1 : 0;
   return out;
 }
+/* k marker spots inside one blob: deepest points of the distance map, each
+   suppressing a disc around itself; the radius relaxes until k of them fit */
+function placeK(idx, dist, W, k, unit){
+  if (!idx.length) return [];
+  const order = idx.slice().sort((a,b) => dist[b]-dist[a]);
+  let supr = 0.72*Math.sqrt(unit);
+  for (;;) {
+    const pts = [], s2 = supr*supr;
+    for (const p of order) {
+      const y = (p/W)|0, x = p - y*W;
+      let ok = true;
+      for (const q of pts) {
+        const dx = x-q.x, dy = y-q.y;
+        if (dx*dx+dy*dy <= s2) { ok = false; break; }
+      }
+      if (ok) { pts.push({x, y}); if (pts.length >= k) return pts; }
+    }
+    if (pts.length >= k || supr < 3) return pts;
+    supr *= 0.7;
+  }
+}
+
 /* green plug faces: hue around 168deg; Otsu on saturation then drops the pale
    translucent collar, which is what keeps neighbouring plugs apart */
 function greenMasks(hsv, n, fo, tight){
@@ -594,7 +650,7 @@ function analyse(){
   const cc = ccLabel(m, W, H);
   if (!cc.comps.length) return fail("綠色區塊太小，試著調低「顏色門檻」");
 
-  const unit = unitOf(cc.comps.map(c => c.a));
+  const unit = unitOf(cc.comps.map(c => c.a))*P.unitAdj;
   let kept = cc.comps.filter(c => c.a >= P.minc*unit);
   kept = biggestCluster(kept, unit);
   if (!kept.length) return fail("沒有符合大小的區塊，試著調低「最小面積」");
@@ -604,28 +660,46 @@ function analyse(){
   for (let i=0; i<W*H; i++) if (cc.lab[i] && keep.has(cc.lab[i])) keptMask[i] = 1;
 
   const dist = edt(keptMask, W, H);
-  const perMax = new Map();
+  const perMax = new Map(), pix = new Map();
   for (let i=0; i<W*H; i++) {
     if (!keptMask[i]) continue;
     const l = cc.lab[i], d = dist[i];
     if (!(perMax.get(l) >= d)) perMax.set(l, d);
+    let a = pix.get(l);
+    if (!a) { a = []; pix.set(l, a); }
+    a.push(i);
   }
   const rTyp = median([...perMax.values()]) || 8;
-  const objs = floodSplit(dist, keptMask, W, H, P.hfac*rTyp).objs
-                 .filter(o => o.a >= 0.15*unit);
 
-  const row = 2.0*rTyp;
-  objs.sort((a,b) => (Math.round(a.cy/row)-Math.round(b.cy/row)) || (a.cx-b.cx));
+  /* the count itself: every blob is round(its area / one plug's area), at least one */
+  const rows = [];
+  let pts = [];
+  kept.slice().sort((a,b) => b.a-a.a).forEach(c => {
+    const ratio = c.a/unit, k = Math.max(1, Math.round(ratio));
+    const off = Math.abs(ratio - Math.floor(ratio) - 0.5);
+    rows.push({a:c.a, ratio, k, edgy: off < 0.15 && ratio > 0.65});
+    pts = pts.concat(placeK(pix.get(c.id) || [], dist, W, k, unit));
+  });
+  const total = rows.reduce((s, r) => s+r.k, 0);
+
+  /* independent second opinion: watershed split of the same mask */
+  const ws = floodSplit(dist, keptMask, W, H, HFAC*rTyp).objs
+               .filter(o => o.a >= 0.15*unit).length;
+
+  const rowH = 2.0*rTyp;
+  pts.sort((a,b) => (Math.round(a.y/rowH)-Math.round(b.y/rowH)) || (a.x-b.x));
 
   S.crop = {canvas:s2.canvas, W, H};
   S.tint = tintOf(keptMask, W, H);
   S.rTyp = rTyp;
-  S.markers = objs.map(o => ({x:o.cx, y:o.cy, manual:false}));
-  S.autoN = objs.length; S.added = 0; S.removed = 0;
+  S.markers = pts.map(p => ({x:p.x, y:p.y, manual:false}));
+  S.autoN = total; S.added = 0; S.removed = 0;
+  S.rows = rows;
   S.stats = {
     unit: Math.round(unit),
     comps: kept.length,
-    area: (objs.reduce((s,o) => s+o.a, 0)/unit),
+    merged: rows.filter(r => r.k > 1).length,
+    ws,
     ms: Math.round(performance.now()-t0)
   };
   S.label = "";
@@ -642,7 +716,7 @@ function tintOf(mask, w, h){
 }
 function fail(msg){
   S.crop = null; S.tint = null; S.markers = []; S.autoN = 0;
-  S.stats = null; S.label = msg;
+  S.stats = null; S.rows = null; S.label = msg;
   render();
 }
 
@@ -684,8 +758,26 @@ function render(){
   els.mEdit.className = (S.added || S.removed) ? "edit" : "";
   els.mUnit.innerHTML = st ? `${st.unit}<small> px²</small>` : "—";
   els.mComp.textContent = st ? st.comps : "—";
-  els.mArea.innerHTML = st ? `${st.area.toFixed(1)}<small> 顆</small>` : "—";
+  els.mMerge.innerHTML = st ? (st.merged ? `${st.merged}<small> 塊</small>` : `<small>沒有</small>`) : "—";
+  els.mWs.innerHTML = st ? `${st.ws}<small>${st.ws === S.autoN ? " 一致" : " 不一致"}</small>` : "—";
+  els.mWs.className = st && st.ws !== S.autoN ? "edit" : "";
   els.mTime.innerHTML = st ? `${st.ms}<small> ms</small>` : "—";
+  renderRows();
+}
+function renderRows(){
+  if (!S.rows || !S.rows.length) {
+    els.rows.innerHTML = `<tr><td colspan="5" class="note">尚無結果</td></tr>`;
+    return;
+  }
+  els.rows.innerHTML = S.rows.map((r, i) => {
+    const cls = [r.k > 1 ? "multi" : "", r.edgy ? "edgy" : ""].filter(Boolean).join(" ");
+    const note = r.edgy ? "比值接近 .5，可能差一顆"
+               : r.k > 1 ? `${r.k} 顆黏在一起`
+               : r.ratio < 0.75 ? "邊緣塞頭，只露出一部分" : "";
+    return `<tr class="${cls}"><td>${i+1}</td><td>${r.a}</td>`
+         + `<td class="r">${r.ratio.toFixed(2)}</td><td class="k">${r.k}</td>`
+         + `<td class="note">${note}</td></tr>`;
+  }).join("");
 }
 function accent(){
   return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0B8C77";
@@ -780,7 +872,7 @@ els.btnClear.addEventListener("click", () => {
   S.markers = [];
   render();
 });
-[["hfac","oHfac",2],["minc","oMinc",2],["tight","oTight",2],["focus","oFocus",2]]
+[["unitAdj","oUnitAdj",2],["minc","oMinc",2],["tight","oTight",2],["focus","oFocus",2]]
   .forEach(([id, out, dp]) => {
     const el = els[id];
     const show = () => { els[out].textContent = (+el.value).toFixed(dp); };
