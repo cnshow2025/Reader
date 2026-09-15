@@ -111,6 +111,10 @@
           letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2)}
   .tbl h2 span{font-family:var(--sans); font-size:12px; font-weight:400; letter-spacing:0;
                text-transform:none; color:var(--ink-3)}
+  .qual{margin:5px 0 0; font-size:12.5px; color:var(--ink-3)}
+  .qual b{font-family:var(--mono); font-variant-numeric:tabular-nums; color:var(--ink-2); font-weight:600}
+  .qual.warn{color:var(--signal)}
+  .qual.warn b{color:var(--signal)}
   .tbl-scroll{overflow-x:auto; margin-top:9px}
   table{border-collapse:collapse; width:100%; font-family:var(--mono);
         font-variant-numeric:tabular-nums; font-size:13.5px}
@@ -125,6 +129,7 @@
   tr.multi td.k{color:var(--accent); font-weight:700}
   tr.edgy td.note{color:var(--signal)}
   tr.edgy td.r{color:var(--signal); font-weight:700}
+  tr.border td.note{color:var(--signal)}
 
   /* ---- advanced ---- */
   details{padding:0}
@@ -210,6 +215,7 @@
 
   <section class="panel tbl">
     <h2>判定明細 <span>每塊綠色區域 ÷ 單顆面積</span></h2>
+    <p class="qual" id="qual">尚無結果</p>
     <div class="tbl-scroll">
       <table>
         <thead><tr><th>區塊</th><th>面積 px²</th><th>÷ 單顆</th><th>判定</th><th>備註</th></tr></thead>
@@ -247,13 +253,13 @@
   <section class="notes panel">
     <h2>它怎麼算的</h2>
     <ol>
-      <li><b>找叢集</b>：先縮到 600 px，用色相 168°±50° 找綠色，並用局部邊緣能量剔除模糊背景，取最大的一塊當作塞頭叢集。</li>
+      <li><b>找整捆</b>：先縮到 600 px，用色相 168°±50° 找綠色，並用局部邊緣能量剔除模糊背景。這裡不能直接取「最大的一塊」—— 每顆塞頭都被自己的透明套環圍住，整捆從來不會連成一塊（範例照片會碎成 58 塊），取最大塊只會框到整捆的一角並把邊緣的塞頭切掉。所以先把遮罩模糊化讓各面融成一個區域，取最大的區域，再框住該區域內所有綠色像素、外加 12% 邊界。</li>
       <li><b>放大重算</b>：把叢集區域從原始照片裁出來、放大到約 1000 px 再處理 —— 手機照片直接整張算會因為太小而黏成一團。</li>
       <li><b>量單顆面積</b>：對綠色遮罩做 Otsu 自動門檻把透明套環排除，切出各塊綠色區域，取面積的<b>中位數</b>當一顆的面積。用中位數而不是最小值 —— 最小的那塊往往是被手掌遮住、只露一角的塞頭，拿它當單位會把總數算成兩倍。</li>
       <li><b>面積相除</b>：每塊區域各自算 <b>四捨五入(區塊面積 ÷ 單顆面積)</b>，至少算一顆，相加就是總數。黏在一起的兩顆面積約兩倍，自然就被算成 2。明細表列出每一塊的比值，比值接近 .5 的會標記出來 —— 那是唯一可能算錯的地方。</li>
       <li><b>標記位置</b>：知道一顆多大之後，用距離轉換在該塊裡挑出 k 個最深的點當標記，所以黏在一起的也會各自標上號碼。另外獨立跑一次分水嶺分割當交叉核對，兩個數字一致就很可靠。</li>
     </ol>
-    <p class="cal">範例照片的正確答案是 <b>20</b> 顆：面積法算出 <b>20</b>，分水嶺核對也是 <b>20</b>。明細表裡 22969 px² 那塊比值 4.43，是這張唯一比較接近臨界的判定。</p>
+    <p class="cal">範例照片的正確答案是 <b>20</b> 顆，面積法算出 <b>20</b>。同一張照片縮到 <b>450</b> px 寬（每顆塞頭只剩 <b>19</b> px）仍然算對，到 340 px 才失效 —— 所以手機隨手拍的解析度遠遠夠用，讓整捆佔滿畫面的好處主要在背景乾淨、對焦準、透視變形小，不在像素多。目前唯一接近臨界的判定是比值 4.4 的那塊（4 顆黏在一起，塞頭朝向不同使投影面積有落差）。</p>
   </section>
 </div>
 
@@ -263,7 +269,7 @@ const SAMPLE = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgwKC
 
 const els = {};
 ["count","status","busy","view","box","tabs","file","cam","btnSample","btnReset","btnClear",
- "mAuto","mEdit","mUnit","mComp","mMerge","mWs","mTime","rows","unitAdj","minc","tight","focus",
+ "mAuto","mEdit","mUnit","mComp","mMerge","mWs","mTime","rows","qual","unitAdj","minc","tight","focus",
  "oUnitAdj","oMinc","oTight","oFocus"].forEach(id => els[id] = document.getElementById(id));
 
 const P = { unitAdj:1.00, minc:0.35, tight:1.00, focus:1.00 };
@@ -613,17 +619,38 @@ function analyse(){
   const m1 = greenMasks(hsv1, W1*H1, fo1, P.tight);
   S.full = s1.canvas;
   if (m1.cnt < 100) return fail("照片裡找不到綠色塞頭");
-  const cc1 = ccLabel(m1.coarse, W1, H1);
+  /* the cluster never forms one connected blob - every plug is fenced off by its own
+     translucent collar - so smear the mask until the faces merge into one region and
+     take the largest region. Taking the largest connected blob instead framed only a
+     corner of the pile and cut plugs off at the edge of the crop. */
+  const dens = boxBlur(m1.coarse, W1, H1, Math.max(4, Math.round(Math.min(W1,H1)/28)));
+  const region = new Uint8Array(W1*H1);
+  for (let i=0; i<W1*H1; i++) region[i] = dens[i] >= 0.22 ? 1 : 0;
+  const cc1 = ccLabel(region, W1, H1);
   if (!cc1.comps.length) return fail("照片裡找不到綠色塞頭");
   let big = cc1.comps[0];
   for (const c of cc1.comps) if (c.a > big.a) big = c;
 
+  /* frame every green pixel inside that region, not just the region itself */
+  let X0 = 1e9, X1 = -1, Y0 = 1e9, Y1 = -1, nsel = 0;
+  for (let y=big.miny; y<=big.maxy; y++) {
+    const o = y*W1;
+    for (let x=big.minx; x<=big.maxx; x++) {
+      const i = o+x;
+      if (cc1.lab[i] !== big.id || !m1.coarse[i]) continue;
+      nsel++;
+      if (x < X0) X0 = x; if (x > X1) X1 = x;
+      if (y < Y0) Y0 = y; if (y > Y1) Y1 = y;
+    }
+  }
+  if (nsel < 50) { X0 = big.minx; X1 = big.maxx; Y0 = big.miny; Y1 = big.maxy; }
+
   const f = sw/W1;
-  const pad = 0.10*Math.max(big.maxx-big.minx, big.maxy-big.miny);
-  const x0 = Math.max(0, Math.floor((big.minx-pad)*f));
-  const x1 = Math.min(sw, Math.ceil((big.maxx+pad)*f));
-  const y0 = Math.max(0, Math.floor((big.miny-pad)*f));
-  const y1 = Math.min(sh, Math.ceil((big.maxy+pad)*f));
+  const pad = 0.12*Math.max(X1-X0, Y1-Y0);
+  const x0 = Math.max(0, Math.floor((X0-pad)*f));
+  const x1 = Math.min(sw, Math.ceil((X1+pad)*f));
+  const y0 = Math.max(0, Math.floor((Y0-pad)*f));
+  const y1 = Math.min(sh, Math.ceil((Y1+pad)*f));
   const cw0 = Math.max(8, x1-x0), ch0 = Math.max(8, y1-y0);
   S.roi = {x0, y0, cw0, ch0, f};
 
@@ -677,7 +704,8 @@ function analyse(){
   kept.slice().sort((a,b) => b.a-a.a).forEach(c => {
     const ratio = c.a/unit, k = Math.max(1, Math.round(ratio));
     const off = Math.abs(ratio - Math.floor(ratio) - 0.5);
-    rows.push({a:c.a, ratio, k, edgy: off < 0.15 && ratio > 0.65});
+    const border = c.minx <= 2 || c.maxx >= W-3 || c.miny <= 2 || c.maxy >= H-3;
+    rows.push({a:c.a, ratio, k, border, edgy: off < 0.15 && ratio > 0.65});
     pts = pts.concat(placeK(pix.get(c.id) || [], dist, W, k, unit));
   });
   const total = rows.reduce((s, r) => s+r.k, 0);
@@ -700,6 +728,8 @@ function analyse(){
     comps: kept.length,
     merged: rows.filter(r => r.k > 1).length,
     ws,
+    plugPx: Math.round(Math.sqrt(unit)*(cw0/W)),   /* one plug, in the photo's own pixels */
+    share: cw0/sw,                                 /* how much of the frame the pile fills */
     ms: Math.round(performance.now()-t0)
   };
   S.label = "";
@@ -762,6 +792,16 @@ function render(){
   els.mWs.innerHTML = st ? `${st.ws}<small>${st.ws === S.autoN ? " 一致" : " 不一致"}</small>` : "—";
   els.mWs.className = st && st.ws !== S.autoN ? "edit" : "";
   els.mTime.innerHTML = st ? `${st.ms}<small> ms</small>` : "—";
+  if (st) {
+    const thin = st.plugPx < 25;
+    els.qual.innerHTML = `拍攝品質：單顆約 <b>${st.plugPx}</b> px 見方 ·`
+      + ` 整捆佔畫面寬 <b>${Math.round(st.share*100)}%</b> · `
+      + (thin ? "解析度偏低，靠近一點重拍會更準" : "解析度充足");
+    els.qual.className = thin ? "qual warn" : "qual";
+  } else {
+    els.qual.textContent = "尚無結果";
+    els.qual.className = "qual";
+  }
   renderRows();
 }
 function renderRows(){
@@ -770,10 +810,12 @@ function renderRows(){
     return;
   }
   els.rows.innerHTML = S.rows.map((r, i) => {
-    const cls = [r.k > 1 ? "multi" : "", r.edgy ? "edgy" : ""].filter(Boolean).join(" ");
-    const note = r.edgy ? "比值接近 .5，可能差一顆"
+    const cls = [r.k > 1 ? "multi" : "", r.edgy ? "edgy" : "", r.border ? "border" : ""]
+                  .filter(Boolean).join(" ");
+    const note = r.border ? "碰到畫面邊緣，可能被切到"
+               : r.edgy ? "比值接近 .5，可能差一顆"
                : r.k > 1 ? `${r.k} 顆黏在一起`
-               : r.ratio < 0.75 ? "邊緣塞頭，只露出一部分" : "";
+               : r.ratio < 0.75 ? "只露出一部分，仍算一顆" : "";
     return `<tr class="${cls}"><td>${i+1}</td><td>${r.a}</td>`
          + `<td class="r">${r.ratio.toFixed(2)}</td><td class="k">${r.k}</td>`
          + `<td class="note">${note}</td></tr>`;
